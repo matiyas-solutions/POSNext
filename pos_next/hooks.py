@@ -164,6 +164,7 @@ doc_events = {
 			"pos_next.realtime_events.emit_stock_update_event",
 			"pos_next.api.wallet.process_loyalty_to_wallet",
 			"pos_next.api.sales_invoice_hooks.record_one_time_offer_usage",
+            "pos_next.pos_next.utils.sales_invoice_return_fix.reconcile_return_against_original",
 		],
 		"on_cancel": [
 			"pos_next.realtime_events.emit_stock_update_event",
