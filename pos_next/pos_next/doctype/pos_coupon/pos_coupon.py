@@ -202,11 +202,21 @@ def apply_coupon_discount(coupon, cart_total, net_total=None):
 
 
 def increment_coupon_usage(coupon_code):
-	"""Increment the usage counter for a coupon"""
+	"""Increment the usage counter for a coupon.
+
+	For one_use coupons, also sets disabled = 1 so the coupon is correctly
+	shown as 'Disabled' (i.e. redeemed) in the POS Coupon list after its first use.
+	"""
 	try:
 		coupon = frappe.get_doc("POS Coupon", {"coupon_code": coupon_code.upper()})
 		coupon.used = (coupon.used or 0) + 1
 		coupon.db_set("used", coupon.used)
+		# For one-time-use coupons, mark the coupon as disabled so it is
+		# clearly shown as redeemed in the POS Coupon list. Without this, a
+		# coupon with one_use=1 stays visually "Active" even after redemption.
+		if coupon.one_use:
+			coupon.db_set("disabled", 1)
+
 		frappe.db.commit()
 	except Exception as e:
 		frappe.log_error(
@@ -216,12 +226,20 @@ def increment_coupon_usage(coupon_code):
 
 
 def decrement_coupon_usage(coupon_code):
-	"""Decrement the usage counter for a coupon (for cancelled invoices)"""
+	"""Decrement the usage counter for a coupon (for cancelled invoices).
+
+	For one_use coupons that were disabled on redemption, re-enable them
+	so the coupon can be used again after the invoice is cancelled.
+	"""
 	try:
 		coupon = frappe.get_doc("POS Coupon", {"coupon_code": coupon_code.upper()})
 		if coupon.used and coupon.used > 0:
 			coupon.used = coupon.used - 1
 			coupon.db_set("used", coupon.used)
+			# Re-enable one_use coupons when the invoice is cancelled
+			if coupon.one_use and coupon.disabled:
+				coupon.db_set("disabled", 0)
+
 			frappe.db.commit()
 	except Exception as e:
 		frappe.log_error(
