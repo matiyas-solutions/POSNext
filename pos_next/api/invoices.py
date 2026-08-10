@@ -1628,12 +1628,16 @@ def submit_invoice(invoice=None, data=None):
         if doctype == "Sales Invoice":
             invoice_doc.update_stock = 1
 
-        # For return invoices, set update_outstanding_for_self = 0
+        # For return invoices, set update_outstanding_for_self = 0 (or 1 if adding to customer balance)
         # This ensures the GL entry's against_voucher points to the original invoice,
         # which properly reduces the original invoice's outstanding amount and
         # sets its status to "Credit Note Issued"
         if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
-            invoice_doc.update_outstanding_for_self = 0
+            add_to_customer_balance = invoice.get("add_to_customer_balance")
+            if add_to_customer_balance:
+                invoice_doc.update_outstanding_for_self = 1
+            else:
+                invoice_doc.update_outstanding_for_self = 0
 
         # Copy accounting dimensions from POS Profile if not already set
         if pos_profile and not invoice_doc.get("branch"):
@@ -1861,13 +1865,20 @@ def submit_invoice(invoice=None, data=None):
         # avoid double-crediting the customer when reversal fails.
         if invoice_doc.get("is_return"):
             add_to_customer_balance = invoice.get("add_to_customer_balance")
-            has_return_against = bool(invoice_doc.get("return_against"))
-            if add_to_customer_balance and (wallet_reversal_ok or not has_return_against):
+            return_value = abs(flt(invoice_doc.grand_total))
+            cash_refunded = abs(flt(invoice_doc.paid_amount))
+
+            if add_to_customer_balance:
+                wallet_credit_amount = return_value
+            else:
+                wallet_credit_amount = 0
+
+            if wallet_credit_amount > 0.01:
                 from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import credit_return_to_wallet
                 try:
                     credit_return_to_wallet(
                         return_invoice=invoice_doc.name,
-                        amount=abs(flt(invoice_doc.grand_total))
+                        amount=wallet_credit_amount
                     )
                 except Exception as wallet_credit_error:
                     frappe.log_error(
