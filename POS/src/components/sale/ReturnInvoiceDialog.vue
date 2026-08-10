@@ -731,7 +731,22 @@
 							}}
 						</p>
 					</div>
-
+					<!-- Customer Wallet / Credit Balance Display -->
+						<div
+							class="bg-gray-50 rounded-xl p-3 border border-gray-200 mb-4 flex items-center justify-between"
+						>
+							<div class="flex items-center gap-2">
+								<FeatherIcon name="credit-card" class="w-4 h-4 text-gray-500" />
+								<span class="text-sm text-gray-600">{{ __("Customer Credit Balance:") }}</span>
+							</div>
+							<span class="text-sm font-bold text-gray-900">
+								{{
+									walletBalanceResource.loading
+										? __("Loading...")
+										: formatCurrency(customerWalletBalance)
+								}}
+							</span>
+						</div>
 					<!-- Add to Customer Credit Option (only for non-credit sales) -->
 					<div
 						v-if="!isOriginalCreditSale"
@@ -783,43 +798,8 @@
 							}}</span>
 						</div>
 					</div>
-
-					<!-- Partially Paid Invoice Notice -->
-					<div
-						v-if="isPartiallyPaid && !isOriginalCreditSale && !addToCustomerCredit"
-						class="bg-blue-50 rounded-xl p-4 border border-blue-200 mb-4 text-start"
-					>
-						<h4 class="text-sm font-bold text-blue-900 mb-1">
-							{{ __("Partially Paid Invoice") }}
-						</h4>
-						<p class="text-xs text-blue-800 mb-2">
-							{{
-								__(
-									"This invoice was partially paid. The refund will be split proportionally."
-								)
-							}}
-						</p>
-						<div class="flex flex-col gap-1 text-xs">
-							<div class="flex justify-between items-center">
-								<span class="text-blue-700">{{ __("Cash Refund:") }}</span>
-								<span class="font-bold text-blue-900">{{
-									formatCurrency(maxRefundableAmount)
-								}}</span>
-							</div>
-							<div
-								v-if="creditAdjustmentAmount > 0"
-								class="flex justify-between items-center"
-							>
-								<span class="text-blue-700">{{ __("Credit Adjustment:") }}</span>
-								<span class="font-bold text-blue-900">{{
-									formatCurrency(creditAdjustmentAmount)
-								}}</span>
-							</div>
-						</div>
-					</div>
-
-					<!-- Regular Payment Methods (only for non-credit sales and not adding to customer credit) -->
-					<div v-if="!isOriginalCreditSale && !addToCustomerCredit">
+					<!-- Regular Payment Methods (only for non-credit sales and not adding to customer credit and when maxRefundableAmount is greater than 0) -->
+					<div v-if="!isOriginalCreditSale && !addToCustomerCredit && maxRefundableAmount > 0">
 						<div
 							class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 gap-2"
 						>
@@ -926,14 +906,12 @@
 						<div class="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
 							<div class="flex items-center justify-between text-sm">
 								<span class="text-gray-600">{{
-									isPartiallyPaid
+									maxRefundableAmount < returnTotal
 										? __("Refundable Amount:")
 										: __("Total Refund:")
 								}}</span>
 								<span class="font-bold text-gray-900">{{
-									formatCurrency(
-										isPartiallyPaid ? maxRefundableAmount : returnTotal
-									)
+									formatCurrency(maxRefundableAmount)
 								}}</span>
 							</div>
 							<div class="flex items-center justify-between text-sm mt-1">
@@ -941,12 +919,7 @@
 								<span
 									:class="[
 										'font-bold',
-										Math.abs(
-											totalPaymentAmount -
-												(isPartiallyPaid
-													? maxRefundableAmount
-													: returnTotal)
-										) < 0.01
+										Math.abs(totalPaymentAmount - maxRefundableAmount) < 0.01
 											? 'text-green-600'
 											: 'text-red-600',
 									]"
@@ -955,16 +928,11 @@
 								</span>
 							</div>
 							<p
-								v-if="
-									Math.abs(
-										totalPaymentAmount -
-											(isPartiallyPaid ? maxRefundableAmount : returnTotal)
-									) >= 0.01
-								"
+								v-if="Math.abs(totalPaymentAmount - maxRefundableAmount) >= 0.01"
 								class="mt-2 text-xs text-amber-600 text-start"
 							>
 								{{
-									isPartiallyPaid
+									maxRefundableAmount < returnTotal
 										? __("⚠️ Payment total must equal refundable amount")
 										: __("⚠️ Payment total must equal refund amount")
 								}}
@@ -973,53 +941,72 @@
 					</div>
 				</div>
 
-				<!-- Return Summary -->
+				<!-- Return Summary / Credit Summary -->
 				<div
 					v-if="selectedItems.length > 0"
-					class="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl p-4 sm:p-5 border border-red-200 shadow-sm"
+					:class="[
+						'rounded-xl p-4 sm:p-5 border shadow-sm',
+						addToCustomerCredit
+							? 'bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-200'
+							: 'bg-gradient-to-br from-red-50 to-orange-50 border-red-200'
+					]"
 				>
 					<div class="flex items-center gap-2 mb-3">
 						<FeatherIcon
-							name="corner-down-left"
-							class="w-5 h-5 text-red-600 flex-shrink-0"
+							:name="addToCustomerCredit ? 'credit-card' : 'corner-down-left'"
+							:class="[
+								'w-5 h-5 flex-shrink-0',
+								addToCustomerCredit ? 'text-emerald-600' : 'text-red-600'
+							]"
 						/>
-						<h3 class="text-sm font-bold text-gray-900">{{ __("Return Summary") }}</h3>
+						<h3 class="text-sm font-bold text-gray-900">
+							{{ addToCustomerCredit ? __("Credit Summary") : __("Return Summary") }}
+						</h3>
 					</div>
 					<div class="flex flex-col gap-2">
 						<div class="flex justify-between items-center">
 							<span class="text-sm text-gray-600">{{ __("Items to Return:") }}</span>
 							<span
-								class="px-2 py-1 bg-white rounded-lg text-sm font-bold text-gray-900 border border-red-200"
+								:class="[
+									'px-2 py-1 bg-white rounded-lg text-sm font-bold text-gray-900 border',
+									addToCustomerCredit ? 'border-emerald-200' : 'border-red-200'
+								]"
 								>{{ selectedItems.length }}</span
 							>
 						</div>
-						<!-- Breakdown for partially paid invoices -->
+						<!-- Breakdown for partially paid invoices or when there is outstanding adjustment -->
 						<template v-if="showPartialBreakdown">
-							<div
-								class="flex justify-between items-center text-sm pt-2 border-t border-red-200"
-							>
+							<div class="flex justify-between items-center text-sm pt-2 border-t border-red-200">
 								<span class="text-gray-600">{{ __("Return Value:") }}</span>
-								<span class="font-medium text-gray-700">{{
-									formatCurrency(returnTotal)
-								}}</span>
+								<span class="font-medium text-gray-700">
+									{{ formatCurrency(returnTotal) }}
+								</span>
 							</div>
-							<div class="flex justify-between items-center text-sm">
-								<span class="text-gray-600">{{ __("Credit Adjustment:") }}</span>
-								<span class="font-medium text-gray-700"
-									>-{{ formatCurrency(creditAdjustmentAmount) }}</span
-								>
+							<div v-if="outstandingAdjustmentAmount > 0" class="flex justify-between items-center text-sm">
+								<span class="text-gray-600">{{ __("Outstanding Adjustment:") }}</span>
+								<span class="font-medium text-gray-700">
+									-{{ formatCurrency(outstandingAdjustmentAmount) }}
+								</span>
 							</div>
 						</template>
 						<!-- Final refund amount -->
 						<div
-							class="flex justify-between items-center pt-2 border-t border-red-200"
+							:class="[
+								'flex justify-between items-center pt-2 border-t',
+								addToCustomerCredit ? 'border-emerald-200' : 'border-red-200'
+							]"
 						>
-							<span class="text-sm sm:text-base font-semibold text-gray-700">{{
-								__(summaryRefundLabel)
-							}}</span>
-							<span class="text-xl sm:text-2xl font-bold text-red-600">{{
-								formatCurrency(summaryRefundAmount)
-							}}</span>
+							<span class="text-sm sm:text-base font-semibold text-gray-700">
+								{{ __(summaryRefundLabel) }}
+							</span>
+							<span
+								:class="[
+									'text-xl sm:text-2xl font-bold',
+									addToCustomerCredit ? 'text-emerald-600' : 'text-red-600'
+								]"
+							>
+								{{ formatCurrency(summaryRefundAmount) }}
+							</span>
 						</div>
 					</div>
 				</div>
@@ -1241,6 +1228,8 @@ const submitError = ref("");
 const isSubmitting = ref(false);
 // When true, return amount is added to customer credit balance instead of cash refund
 const addToCustomerCredit = ref(false);
+// Customer's current wallet/credit balance, fetched when an invoice is loaded
+const customerWalletBalance = ref(0);
 
 // Autocomplete state
 const invoiceSearchInput = ref(null);
@@ -1387,6 +1376,12 @@ const fetchInvoiceResource = createResource({
 				docstatus: 1, // Already validated by backend
 				is_return: 0,
 			};
+			// Fetch the customer's current credit/wallet balance for display
+				walletBalanceResource.submit({
+					customer: originalInvoice.value.customer,
+					company: originalInvoice.value.company,
+					exclude_invoice: originalInvoice.value.name,
+				});
 
 			// Map items for UI display and selection.
 			// - sales_invoice_item: links to original item row for accurate return tracking
@@ -1457,8 +1452,9 @@ const createReturnResource = createResource({
 			is_return: 1,
 			return_against: baseDoc.return_against || originalInvoice.value.name,
 			// Setting to 0 ensures GL entries point to original invoice,
-			// which reduces its outstanding amount and updates its status
-			update_outstanding_for_self: 0,
+			// which reduces its outstanding amount and updates its status.
+			// Setting to 1 prevents updating the original invoice's outstanding amount.
+			update_outstanding_for_self: addToCustomerCredit.value ? 1 : 0,
 			is_pos: 1,
 			update_stock: 1,
 			// Include sales_team from the prepared document.
@@ -1483,14 +1479,16 @@ const createReturnResource = createResource({
 			// Flag to indicate return amount should be added to customer credit balance
 			add_to_customer_balance: addToCustomerCredit.value,
 			// Payment amounts are negative for refunds
-			// If addToCustomerCredit is true, send empty payments array so outstanding stays negative
-			// This negative outstanding becomes customer credit balance
+			// If addToCustomerCredit is true or maxRefundableAmount is 0, send empty payments array so outstanding stays negative
+			// This negative outstanding becomes customer credit balance or adjusts the original outstanding balance
 			payments: addToCustomerCredit.value
 				? []
-				: refundPayments.value.map((payment) => ({
-						mode_of_payment: payment.mode_of_payment,
-						amount: -Math.abs(payment.amount),
-				  })),
+				: refundPayments.value
+						.filter((payment) => payment.amount > 0)
+						.map((payment) => ({
+							mode_of_payment: payment.mode_of_payment,
+							amount: -Math.abs(payment.amount),
+						})),
 			remarks: returnReason.value || __("Return against {0}", [originalInvoice.value.name]),
 		};
 
@@ -1624,32 +1622,27 @@ const totalPaymentAmount = computed(() =>
 	)
 );
 
-const maxRefundableAmount = computed(() => {
-	if (!originalInvoice.value) return 0
-	if (!isPartiallyPaid.value && !isOriginalCreditSale.value)
-		return returnTotal.value
-
-	const grandTotal = Math.abs(originalInvoice.value.grand_total) || 1
-	const returnRatio = returnTotal.value / grandTotal
+const outstandingAdjustmentAmount = computed(() => {
+	if (!originalInvoice.value || addToCustomerCredit.value) return 0;
 	return roundToNearestZeroOrFive(
-		Math.min(returnTotal.value, originalPaidAmount.value * returnRatio),
-	)
-})
+		Math.min(returnTotal.value, originalOutstandingAmount.value)
+	);
+});
 
-// Amount that goes toward credit balance (for partially paid invoices)
-const creditAdjustmentAmount = computed(() =>
-	isPartiallyPaid.value
-		? roundToNearestZeroOrFive(Math.max(0, returnTotal.value - maxRefundableAmount.value))
-		: 0,
-)
+const maxRefundableAmount = computed(() => {
+	if (!originalInvoice.value) return 0;
+	return roundToNearestZeroOrFive(
+		Math.max(0, returnTotal.value - outstandingAdjustmentAmount.value)
+	);
+});
 
 // Summary display helpers for the Return Summary section
-const showPartialBreakdown = computed(() => isPartiallyPaid.value && !isOriginalCreditSale.value);
+const showPartialBreakdown = computed(() => outstandingAdjustmentAmount.value > 0);
 const summaryRefundLabel = computed(() =>
-	showPartialBreakdown.value ? "Cash Refund:" : "Refund Amount:"
+	addToCustomerCredit.value ? "Credit Amount:" : (showPartialBreakdown.value ? "Cash Refund:" : "Refund Amount:")
 );
 const summaryRefundAmount = computed(() =>
-	showPartialBreakdown.value ? maxRefundableAmount.value : returnTotal.value
+	addToCustomerCredit.value ? returnTotal.value : (showPartialBreakdown.value ? maxRefundableAmount.value : returnTotal.value)
 );
 
 // Cache RTL direction check (only needs to run once per session)
@@ -1661,26 +1654,15 @@ const paymentSelectStyle = {
 const canCreateReturn = computed(() => {
 	const hasSelectedItems = selectedItems.value.length > 0;
 	if (!hasSelectedItems || !hasOpenShift.value) return false;
-	// Credit sale returns and "add to customer credit" returns don't need payment validation
-	if (isOriginalCreditSale.value || addToCustomerCredit.value) return true;
+	if (addToCustomerCredit.value) return true;
+	if (maxRefundableAmount.value === 0) return true;
 
 	const payments = refundPayments.value;
-	if (isPartiallyPaid.value) {
-		if (!payments.length) return true;
-		const hasValidPayments = payments.every(
-			(payment) => payment.mode_of_payment && payment.amount >= 0
-		);
-		return (
-			hasValidPayments &&
-			Math.abs(totalPaymentAmount.value - maxRefundableAmount.value) < 0.01
-		);
-	}
-
 	if (!payments.length) return false;
 	const hasValidPayments = payments.every(
 		(payment) => payment.mode_of_payment && payment.amount > 0
 	);
-	return hasValidPayments && Math.abs(totalPaymentAmount.value - returnTotal.value) < 0.01;
+	return hasValidPayments && Math.abs(totalPaymentAmount.value - maxRefundableAmount.value) < 0.01;
 });
 
 // Shared filter function to avoid duplicate code
@@ -1753,15 +1735,13 @@ watch(normalizedSearchTerm, (searchTerm) => {
 	}, SEARCH_DEBOUNCE_MS);
 });
 
-// Auto-populate payment amount when return total changes (single payment only)
-watch(returnTotal, (newTotal) => {
-	if (!returnModal.visible || !showDialog.value || isOriginalCreditSale.value) return;
-	if (refundPayments.value.length !== 1 || newTotal <= 0) return;
+// Auto-populate payment amount when max refundable amount changes (single payment only)
+watch(maxRefundableAmount, (newMax) => {
+	if (!returnModal.visible) return;
+	if (refundPayments.value.length !== 1) return;
 
-	refundPayments.value[0].amount = isPartiallyPaid.value
-		? roundCurrency(maxRefundableAmount.value)
-		: newTotal;
-});
+	refundPayments.value[0].amount = roundCurrency(newMax);
+}, { immediate: true });
 
 // Methods
 function extractErrorMessage(error, fallbackMessage = __("Failed to create return invoice")) {
@@ -1885,6 +1865,18 @@ function initializePaymentsFromInvoice() {
 const checkInvoiceValidityResource = createResource({
 	url: "pos_next.api.invoices.check_invoice_return_validity",
 	auto: false,
+});
+// Resource for fetching the customer's current wallet/credit balance
+const walletBalanceResource = createResource({
+	url: "pos_next.pos_next.doctype.wallet.wallet.get_customer_wallet_balance",
+	auto: false,
+	onSuccess(data) {
+		customerWalletBalance.value = Number(data) || 0;
+	},
+	onError(error) {
+		console.error("Error fetching wallet balance:", error);
+		customerWalletBalance.value = 0;
+	},
 });
 
 /**
@@ -2134,6 +2126,7 @@ function resetForm() {
 
 	// Reset customer credit option
 	addToCustomerCredit.value = false;
+	customerWalletBalance.value = 0;
 }
 
 // Date formatter instance (reused for performance)
