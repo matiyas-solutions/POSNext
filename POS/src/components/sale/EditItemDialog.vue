@@ -497,6 +497,7 @@
 		approval-type="Item Discount"
 		:amount="pendingDiscountAmount"
 		:reason="`Discount on ${pendingDiscountItem?.item_name || ''}`"
+		:currency="props.currency"
 		@approved="onDiscountApprovalGranted"
 	/>
 </template>
