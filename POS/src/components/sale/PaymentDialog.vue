@@ -1931,6 +1931,7 @@
 		approval-type="Additional Discount"
 		:amount="pendingAdditionalDiscountAmount"
 		reason="Additional bill discount"
+		:currency="props.currency"
 		@approved="onAdditionalDiscountApprovalGranted"
 	/>
 </template>

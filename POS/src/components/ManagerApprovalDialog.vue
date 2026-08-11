@@ -88,7 +88,7 @@ import { ref, computed, watch } from 'vue'
 import { Dialog } from 'frappe-ui'
 import { call } from '@/utils/apiWrapper'
 import { __ } from '@/utils/translation'
-import { formatCurrency } from '@/utils/currency'
+import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from '@/utils/currency'
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -104,7 +104,15 @@ const props = defineProps({
 		type: String,
 		default: '',
 	},
+	currency: {
+		type: String,
+		default: DEFAULT_CURRENCY,
+	},
 })
+
+function formatCurrency(amount) {
+	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
+}
 
 const emit = defineEmits(['update:modelValue', 'approved', 'rejected'])
 

@@ -1162,6 +1162,7 @@
 		approval-type="Cash Refund"
 		:amount="maxRefundableAmount"
 		:reason="returnReason"
+		:currency="props.currency"
 		@approved="onManagerApproved"
 	/>
 </template>

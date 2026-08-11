@@ -9,7 +9,6 @@
 							v-model="searchTerm"
 							type="text"
 							:placeholder="__('Search by invoice number, customer or item code...')"
-							@input="searchInvoices"
 						>
 							<template #prefix>
 								<svg
@@ -286,7 +285,7 @@ const isLoadingMore = ref(false);
 
 // Create resource for loading invoices
 // Uses the custom get_invoices API which returns invoice items (item_code, item_name)
-// so we can filter by item code on the client side.
+// and searches the full dataset server-side (not just the currently loaded page).
 const invoicesResource = createResource({
 	url: "pos_next.api.invoices.get_invoices",
 	makeParams() {
@@ -294,6 +293,7 @@ const invoicesResource = createResource({
 			pos_profile: props.posProfile,
 			limit: pageSize,
 			start: page.value * pageSize,
+			search_term: searchTerm.value || undefined,
 		}
 	},
 	auto: false,
@@ -340,24 +340,12 @@ watch(showReturnDialog, (val) => {
 	}
 });
 
+// Text search (invoice number / customer / item code) is done server-side
+// (see search_term in invoicesResource) so it covers the full dataset, not
+// just whatever page happens to be loaded. Payment mode stays a client-side
+// filter over the already-loaded invoices.
 const filteredInvoices = computed(() => {
 	let result = invoices.value;
-
-	if (searchTerm.value) {
-		const term = searchTerm.value.toLowerCase();
-		result = result.filter(
-			(inv) =>
-				inv.name?.toLowerCase().includes(term) ||
-				inv.customer_name?.toLowerCase().includes(term) ||
-				// Search across invoice items by item_code or item_name
-				(Array.isArray(inv.items) &&
-					inv.items.some(
-						(item) =>
-							item.item_code?.toLowerCase().includes(term) ||
-							item.item_name?.toLowerCase().includes(term),
-					)),
-		);
-	}
 
 	if (paymentMode.value) {
 		result = result.filter((inv) => invoiceHasPaymentMode(inv, paymentMode.value));
@@ -419,9 +407,19 @@ function loadMore() {
 	invoicesResource.reload();
 }
 
-function searchInvoices() {
-	// Debounced search - already filtered by computed property
-}
+// Debounced server-side search: reset to page 1 and refetch whenever the
+// search term changes, so results come from the full dataset instead of
+// just whatever page is currently loaded.
+let searchTimeout = null;
+watch(searchTerm, () => {
+	if (searchTimeout) clearTimeout(searchTimeout);
+	searchTimeout = setTimeout(() => {
+		if (!props.posProfile) return;
+		page.value = 0;
+		isLoadingMore.value = false;
+		invoicesResource.reload();
+	}, 300);
+});
 
 function viewInvoice(invoice) {
 	emit("view-invoice", invoice);

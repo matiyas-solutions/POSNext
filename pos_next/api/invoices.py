@@ -1960,6 +1960,19 @@ def submit_invoice(invoice=None, data=None):
 # ==========================================
 
 
+def _get_sales_invoice_permission_condition():
+	"""Aggregate any app-registered Sales Invoice permission_query_conditions
+	hooks (e.g. mahavirhomestores restricting visibility to warehouses tied to
+	the user's POS Profile) into a single SQL boolean expression referencing
+	`tabSales Invoice`, or None if no hook applies (e.g. Administrator).
+	"""
+	conditions = []
+	for method in frappe.get_hooks("permission_query_conditions", {}).get("Sales Invoice", []):
+		if condition := frappe.call(frappe.get_attr(method), frappe.session.user, doctype="Sales Invoice"):
+			conditions.append(condition)
+	return " and ".join(conditions) if conditions else None
+
+
 @frappe.whitelist()
 def get_invoice(invoice_name):
     """
@@ -1988,7 +2001,7 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
-def get_invoices(pos_profile, limit=20, start=0):
+def get_invoices(pos_profile, limit=20, start=0, search_term=None):
     """
     Get list of invoices for a POS Profile.
 
@@ -1996,6 +2009,9 @@ def get_invoices(pos_profile, limit=20, start=0):
         pos_profile: POS Profile name
         limit: Maximum number of invoices to return per page (default 20)
         start: Offset for pagination (default 0)
+        search_term: Optional text to match against invoice number, customer
+            name, or item code/name - searched across the full dataset (not
+            just whatever page is currently loaded on the client).
 
     Returns:
         List of invoices with details including items (item_code, item_name)
@@ -2015,8 +2031,33 @@ def get_invoices(pos_profile, limit=20, start=0):
     limit = int(limit)
     start = int(start)
 
+    conditions = ["pos_profile = %(pos_profile)s", "docstatus = 1", "is_pos = 1"]
+    values = {"pos_profile": pos_profile, "limit": limit, "start": start}
+
+    # Respect any app-registered Sales Invoice permission_query_conditions hook
+    # (e.g. mahavirhomestores restricting visibility to warehouses tied to the
+    # user's POS Profile) so store isolation is enforced the same way here as
+    # it is on the desk list and the return-invoice search.
+    permission_condition = _get_sales_invoice_permission_condition()
+    if permission_condition:
+        conditions.append(f"({permission_condition})")
+
+    if search_term:
+        conditions.append("""(
+            name LIKE %(search_term)s
+            OR customer_name LIKE %(search_term)s
+            OR EXISTS (
+                SELECT 1 FROM `tabSales Invoice Item` sii
+                WHERE sii.parent = `tabSales Invoice`.name
+                AND (sii.item_code LIKE %(search_term)s OR sii.item_name LIKE %(search_term)s)
+            )
+        )""")
+        values["search_term"] = f"%{search_term}%"
+
+    where_clause = " AND ".join(conditions)
+
     # Query for invoices with pagination
-    invoices = frappe.db.sql("""
+    invoices = frappe.db.sql(f"""
         SELECT
             name,
             customer,
@@ -2033,18 +2074,12 @@ def get_invoices(pos_profile, limit=20, start=0):
         FROM
             `tabSales Invoice`
         WHERE
-            pos_profile = %(pos_profile)s
-            AND docstatus = 1
-            AND is_pos = 1
+            {where_clause}
         ORDER BY
             posting_date DESC,
             posting_time DESC
         LIMIT %(limit)s OFFSET %(start)s
-    """, {
-        "pos_profile": pos_profile,
-        "limit": limit,
-        "start": start,
-    }, as_dict=True)
+    """, values, as_dict=True)
 
     # Load items for each invoice for filtering purposes
     for invoice in invoices:
@@ -2289,6 +2324,16 @@ def get_returnable_invoices(limit=50, pos_profile=None):
         .limit(fetch_limit)
     )
 
+    # Respect any app-registered Sales Invoice permission_query_conditions hook
+    # so this list only ever shows invoices from stores the user can access -
+    # without this, a user could browse (though not actually return) invoices
+    # from other stores.
+    permission_condition = _get_sales_invoice_permission_condition()
+    if permission_condition:
+        from pypika.terms import PseudoColumn
+
+        query = query.where(PseudoColumn(permission_condition))
+
     if return_validity_days > 0:
         cutoff_date = add_days(today(), -return_validity_days)
         query = query.where(si.posting_date >= cutoff_date)
@@ -2356,6 +2401,16 @@ def search_invoice_by_number(search_term, pos_profile=None):
         & (si.is_return == 0)
         & (si.is_pos == 1)
     )
+
+    # Respect any app-registered Sales Invoice permission_query_conditions hook
+    # so a cross-store invoice number can't be searched up by number/item code
+    # even though it can't actually be returned - without this, the search
+    # leaks other stores' invoice/customer data before the block ever fires.
+    permission_condition = _get_sales_invoice_permission_condition()
+    if permission_condition:
+        from pypika.terms import PseudoColumn
+
+        base_conditions = base_conditions & PseudoColumn(permission_condition)
 
     # Search by invoice name
     name_candidates = (
@@ -2431,6 +2486,9 @@ def check_invoice_return_validity(invoice_name):
 			"message": _("Invoice {0} does not exist").format(invoice_name),
 		}
 
+	if not frappe.has_permission("Sales Invoice", "read", invoice_name):
+		frappe.throw(_("You don't have permission to view this invoice"))
+
 	invoice_info = invoice_data[0]
 
 	# Check return validity period from POS Settings
@@ -2477,6 +2535,9 @@ def get_invoice_for_return(invoice_name):
 
 	if not invoice_check:
 		frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
+
+	if not frappe.has_permission("Sales Invoice", "read", invoice_name):
+		frappe.throw(_("You don't have permission to view this invoice"))
 
 	invoice_info = invoice_check[0]
 
@@ -2756,6 +2817,13 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
     if not invoice_check:
         frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
 
+    # Explicit check here rather than relying solely on make_sales_return's
+    # internal get_mapped_doc permission check below - that's an ERPNext
+    # implementation detail, not a guarantee, and this needs to fail the
+    # same way regardless of how ERPNext implements the mapping utility.
+    if not frappe.has_permission("Sales Invoice", "read", invoice_name):
+        frappe.throw(_("You don't have permission to view this invoice"))
+
     invoice_info = invoice_check[0]
 
     # Validate docstatus
@@ -2990,6 +3058,19 @@ def search_invoices_for_return(
 		.limit(page_length)
 		.offset(start)
 	)
+
+	# Respect any app-registered Sales Invoice permission_query_conditions hook
+	# (e.g. restricting visibility to warehouses tied to the user's POS Profile).
+	# Without this, raw frappe.qb queries bypass those hooks entirely, so the
+	# search list could show invoices the user isn't actually allowed to open.
+	from pypika.terms import PseudoColumn
+
+	permission_conditions = []
+	for method in frappe.get_hooks("permission_query_conditions", {}).get(doctype, []):
+		if condition := frappe.call(frappe.get_attr(method), frappe.session.user, doctype=doctype):
+			permission_conditions.append(condition)
+	if permission_conditions:
+		query = query.where(PseudoColumn(" and ".join(permission_conditions)))
 
 	# Add company filter
 	if company:
