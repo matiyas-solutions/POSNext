@@ -157,69 +157,6 @@
 						</option>
 					</select>
 				</div>
-
-				<!-- Territory -->
-				<div>
-					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
-						{{ __("Territory") }}
-					</label>
-					<select
-						v-model="customerData.territory"
-						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-					>
-						<option value="">{{ __("Select Territory") }}</option>
-						<option
-							v-for="territory in territories"
-							:key="territory"
-							:value="territory"
-						>
-							{{ territory }}
-						</option>
-					</select>
-				</div>
-
-				<!-- Governorate -->
-				<div>
-					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
-						{{ __("Governorate") }}
-					</label>
-					<select
-						v-model="customerData.custom_governorate"
-						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-					>
-						<option value="">{{ __("Select Governorate") }}</option>
-						<option v-for="gov in governorates" :key="gov" :value="gov">
-							{{ gov }}
-						</option>
-					</select>
-				</div>
-
-				<!-- District (filtered by selected Governorate) -->
-				<div>
-					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
-						{{ __("District") }}
-					</label>
-					<select
-						v-model="customerData.custom_district"
-						:disabled="!customerData.custom_governorate"
-						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-					>
-						<option value="">
-							{{
-								customerData.custom_governorate
-									? __("Select District")
-									: __("Select a governorate first")
-							}}
-						</option>
-						<option
-							v-for="district in districts"
-							:key="district.name"
-							:value="district.name"
-						>
-							{{ district.district }}
-						</option>
-					</select>
-				</div>
 			</div>
 		</template>
 
@@ -294,6 +231,7 @@ import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const log = logger.create("CreateCustomerDialog");
+const DEFAULT_CUSTOMER_GROUP = "Individual";
 
 // =============================================================================
 // Composables & Stores
@@ -330,19 +268,13 @@ const dropdownRef = ref(null);
 const countrySearchRef = ref(null);
 
 const customerGroups = ref([]);
-const territories = ref([]);
-const governorates = ref([]);
-const districts = ref([]);
 
 const customerData = ref({
 	customer_name: "",
 	mobile_no: "",
 	email_id: "",
 	pincode: "",
-	customer_group: "",
-	territory: "",
-	custom_governorate: "",
-	custom_district: "",
+	customer_group: DEFAULT_CUSTOMER_GROUP,
 });
 
 // =============================================================================
@@ -374,7 +306,7 @@ const filteredCountries = computed(() => {
 });
 
 // =============================================================================
-// Country & Territory Methods
+// Country Methods
 // =============================================================================
 
 const handleFlagError = (e) => (e.target.style.display = "none");
@@ -386,7 +318,28 @@ const selectCountry = (country) => {
 	updateMobileNumber();
 };
 
+const detectCountryFromNumber = (digits) => {
+	if (!digits) return null;
+	// Check longest calling codes first (e.g. "966" before "91") to avoid false matches
+	const sorted = [...countriesStore.countries].sort(
+		(a, b) => b.isd.replace("+", "").length - a.isd.replace("+", "").length
+	);
+	return sorted.find((c) => {
+		const code = c.isd.replace("+", "");
+		return digits.startsWith(code) && digits.length > code.length;
+	});
+};
+
 const updateMobileNumber = () => {
+	const digitsOnly = phoneNumber.value.replace(/\D/g, "");
+	const matched = detectCountryFromNumber(digitsOnly);
+
+	if (matched && matched.isd !== selectedCountryCode.value) {
+		selectedCountryCode.value = matched.isd;
+		const code = matched.isd.replace("+", "");
+		phoneNumber.value = digitsOnly.slice(code.length);
+	}
+
 	customerData.value.mobile_no = phoneNumber.value
 		? `${selectedCountryCode.value}-${phoneNumber.value}`
 		: "";
@@ -415,33 +368,6 @@ const setCountryFromName = (countryName) => {
 	}
 };
 
-/** Auto-set territory based on selected country (exact or fuzzy match) */
-const updateTerritoryFromCountry = () => {
-	if (!territories.value.length) return;
-
-	const country = countriesStore.countries.find((c) => c.isd === selectedCountryCode.value);
-	if (!country) return;
-
-	// Try exact match first
-	if (territories.value.includes(country.name)) {
-		customerData.value.territory = country.name;
-		log.info(`Territory set to: ${country.name}`);
-		return;
-	}
-
-	// Try fuzzy match
-	const fuzzyMatch = territories.value.find(
-		(t) =>
-			t.toLowerCase().includes(country.name.toLowerCase()) ||
-			country.name.toLowerCase().includes(t.toLowerCase())
-	);
-
-	if (fuzzyMatch) {
-		customerData.value.territory = fuzzyMatch;
-		log.info(`Territory set to fuzzy match: ${fuzzyMatch}`);
-	}
-};
-
 // =============================================================================
 // API Resources
 // =============================================================================
@@ -454,9 +380,6 @@ const createCustomerResource = createResource({
 		email_id: customerData.value.email_id || "",
 		custom_pincode: customerData.value.pincode || "",
 		customer_group: customerData.value.customer_group || "",
-		territory: customerData.value.territory || "",
-		custom_governorate: customerData.value.custom_governorate || "",
-		custom_district: customerData.value.custom_district || "",
 		pos_profile: props.posProfile,
 	}),
 	onSuccess: (data) => {
@@ -478,12 +401,9 @@ const updateCustomerResource = createResource({
 		fieldname: {
 			customer_name: customerData.value.customer_name,
 			customer_group: customerData.value.customer_group || "",
-			territory: customerData.value.territory || "",
 			mobile_no: customerData.value.mobile_no || "",
 			email_id: customerData.value.email_id || "",
 			custom_pincode: customerData.value.pincode || "",
-			custom_governorate: customerData.value.custom_governorate || "",
-			custom_district: customerData.value.custom_district || "",
 		},
 	}),
 	onSuccess: (data) => {
@@ -501,7 +421,7 @@ const sellingSettingsResource = createResource({
 	url: "frappe.client.get_value",
 	makeParams: () => ({
 		doctype: "Selling Settings",
-		fieldname: ["customer_group", "territory"],
+		fieldname: ["customer_group"],
 	}),
 	auto: false,
 	onError: (err) => log.error("Error loading Selling Settings", err),
@@ -530,62 +450,14 @@ const createListResource = (doctype, onSuccess) =>
 
 const customerGroupsResource = createListResource("Customer Group", (names) => {
 	customerGroups.value = names;
-	if (!customerData.value.customer_group && names.length > 0) {
-		const settingsDefault = sellingSettingsResource.data?.customer_group;
-		customerData.value.customer_group = pickDefault(settingsDefault, names);
-	}
-});
-
-const territoriesResource = createListResource("Territory", (names) => {
-	territories.value = names;
-	if (!customerData.value.territory && names.length > 0) {
-		const settingsDefault = sellingSettingsResource.data?.territory;
-		customerData.value.territory = pickDefault(settingsDefault, names, (list) =>
-			list.find((n) => n === "All Territories")
-		);
-	}
-});
-
-const governoratesResource = createListResource("Governorate", (names) => {
-	governorates.value = names;
-});
-
-const customerLocationResource = createResource({
-	url: "frappe.client.get_value",
-	makeParams: () => ({
-		doctype: "Customer",
-		filters: { name: props.customer?.name },
-		fieldname: ["custom_governorate", "custom_district"],
-	}),
-	auto: false,
-	onSuccess: (data) => {
-		customerData.value.custom_governorate = data?.custom_governorate || "";
-		customerData.value.custom_district = data?.custom_district || "";
-	},
-	onError: (err) => log.error("Error loading customer location", err),
-});
-
-const districtsResource = createResource({
-	url: "frappe.client.get_list",
-	makeParams: () => ({
-		doctype: "District",
-		fields: ["name", "district"],
-		filters: { governorate: customerData.value.custom_governorate },
-		limit_page_length: 0,
-		order_by: "district asc",
-	}),
-	auto: false,
-	onSuccess: (data) => {
-		districts.value = data || [];
-		// Drop the selected district if it no longer belongs to the governorate
-		if (
-			customerData.value.custom_district &&
-			!districts.value.some((d) => d.name === customerData.value.custom_district)
-		) {
-			customerData.value.custom_district = "";
+	if (!customerData.value.customer_group) {
+		if (names.includes(DEFAULT_CUSTOMER_GROUP)) {
+			customerData.value.customer_group = DEFAULT_CUSTOMER_GROUP;
+		} else {
+			const settingsDefault = sellingSettingsResource.data?.customer_group;
+			customerData.value.customer_group = pickDefault(settingsDefault, names);
 		}
-	},
-	onError: (err) => log.error("Error loading Districts", err),
+	}
 });
 
 const posProfileResource = createResource({
@@ -614,22 +486,11 @@ const loadDialogData = async () => {
 	await sellingSettingsResource.reload();
 
 	if (!isEditMode.value) {
-		customerData.value.customer_group = "";
-		customerData.value.territory = "";
+		customerData.value.customer_group = DEFAULT_CUSTOMER_GROUP;
 	}
 
 	// Load form options
-	await Promise.all([
-		territoriesResource.reload(),
-		customerGroupsResource.reload(),
-		governoratesResource.reload(),
-	]);
-	if (isEditMode.value && props.customer?.name) {
-		await customerLocationResource.reload();
-	}
-	if (customerData.value.custom_governorate) {
-		await districtsResource.reload();
-	}
+	await customerGroupsResource.reload();
 	checkPermissions();
 
 	// Set country from POS Profile
@@ -675,8 +536,7 @@ const populateFromCustomer = (customer) => {
 	customerData.value.customer_name = customer.customer_name || ""
 	customerData.value.email_id = customer.email_id || ""
 	customerData.value.pincode = customer.custom_pincode || ""
-	customerData.value.customer_group = customer.customer_group || "Individual"
-	customerData.value.territory = customer.territory || "All Territories"
+	customerData.value.customer_group = customer.customer_group || DEFAULT_CUSTOMER_GROUP
 	// Handle mobile_no with country code
 	if (customer.mobile_no) {
 		customerData.value.mobile_no = customer.mobile_no
@@ -700,14 +560,10 @@ const resetForm = () => {
 		mobile_no: "",
 		email_id: "",
 		pincode: "",
-		customer_group: pickDefault(settings.customer_group, customerGroups.value),
-		territory: pickDefault(settings.territory, territories.value, (list) =>
-			list.find((n) => n === "All Territories")
-		),
-		custom_governorate: "",
-		custom_district: "",
+		customer_group: customerGroups.value.includes(DEFAULT_CUSTOMER_GROUP)
+			? DEFAULT_CUSTOMER_GROUP
+			: pickDefault(settings.customer_group, customerGroups.value),
 	});
-	districts.value = [];
 	selectedCountryCode.value = "";
 	phoneNumber.value = "";
 };
@@ -747,24 +603,6 @@ watch(
 			const [code, ...rest] = value.split("-");
 			selectedCountryCode.value = code;
 			phoneNumber.value = rest.join("-");
-		}
-	}
-);
-
-watch(selectedCountryCode, async (newVal, oldVal) => {
-	if (!oldVal) return;
-	await nextTick();
-	updateTerritoryFromCountry();
-});
-
-watch(
-	() => customerData.value.custom_governorate,
-	(governorate) => {
-		if (governorate) {
-			districtsResource.reload();
-		} else {
-			districts.value = [];
-			customerData.value.custom_district = "";
 		}
 	}
 );
