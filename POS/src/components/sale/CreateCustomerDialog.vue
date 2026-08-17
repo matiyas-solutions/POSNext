@@ -111,6 +111,9 @@
 						<input
 							v-model="phoneNumber"
 							type="tel"
+							inputmode="numeric"
+							maxlength="10"
+							minlength="10"
 							:placeholder="__('Enter phone number')"
 							class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-start"
 							@input="updateMobileNumber"
@@ -199,7 +202,13 @@
 						variant="solid"
 						@click="handleCreate"
 						:loading="createCustomerResource.loading || updateCustomerResource.loading || checkingPermission"
-						:disabled="!customerData.customer_name || !customerData.pincode || !phoneNumber || !hasPermission"
+						:disabled="
+								!customerData.customer_name ||
+								!customerData.pincode ||
+								!phoneNumber ||
+								(selectedCountryCode === '+91' && phoneNumber.length !== 10) ||
+								!hasPermission
+							"
 					>
 						{{ isEditMode ? __("Save Changes") : __("Create Customer") }}
 					</Button>
@@ -331,18 +340,30 @@ const detectCountryFromNumber = (digits) => {
 };
 
 const updateMobileNumber = () => {
-	const digitsOnly = phoneNumber.value.replace(/\D/g, "");
-	const matched = detectCountryFromNumber(digitsOnly);
+    // Keep digits only
+    let digitsOnly = phoneNumber.value.replace(/\D/g, "");
 
-	if (matched && matched.isd !== selectedCountryCode.value) {
-		selectedCountryCode.value = matched.isd;
-		const code = matched.isd.replace("+", "");
-		phoneNumber.value = digitsOnly.slice(code.length);
-	}
+    // If user enters country code inside the phone field, remove it
+    const selectedCode = selectedCountryCode.value?.replace("+", "");
 
-	customerData.value.mobile_no = phoneNumber.value
-		? `${selectedCountryCode.value}-${phoneNumber.value}`
-		: "";
+    if (
+        selectedCode &&
+        digitsOnly.startsWith(selectedCode) &&
+        digitsOnly.length > 10
+    ) {
+        digitsOnly = digitsOnly.slice(selectedCode.length);
+    }
+
+    // For India (+91), allow ONLY 10 digits
+    if (selectedCountryCode.value === "+91") {
+        digitsOnly = digitsOnly.slice(0, 10);
+    }
+
+    phoneNumber.value = digitsOnly;
+
+    customerData.value.mobile_no = digitsOnly
+        ? `${selectedCountryCode.value}-${digitsOnly}`
+        : "";
 };
 
 const handleClickOutside = (event) => {
@@ -514,20 +535,31 @@ const checkPermissions = async () => {
 };
 
 const handleCreate = async () => {
-	if (!customerData.value.customer_name) {
-		return showError(__("Customer Name is required"));
-	}
-	if (!customerData.value.pincode) {
-		return showError(__("Pincode is required"))
-	}
-	if (!phoneNumber.value) {
-		return showError(__("Mobile Number is required"));
-	}
-	if (isEditMode.value) {
-		await updateCustomerResource.submit();
-	} else {
-		await createCustomerResource.submit();
-	}
+    if (!customerData.value.customer_name) {
+        return showError(__("Customer Name is required"));
+    }
+
+    if (!customerData.value.pincode) {
+        return showError(__("Pincode is required"));
+    }
+
+    if (!phoneNumber.value) {
+        return showError(__("Mobile Number is required"));
+    }
+
+    // India mobile number must be exactly 10 digits
+    if (
+        selectedCountryCode.value === "+91" &&
+        phoneNumber.value.length !== 10
+    ) {
+        return showError(__("Indian mobile number must be exactly 10 digits"));
+    }
+
+    if (isEditMode.value) {
+        await updateCustomerResource.submit();
+    } else {
+        await createCustomerResource.submit();
+    }
 };
 
 /** Populate the form fields from a customer object (edit mode). */
