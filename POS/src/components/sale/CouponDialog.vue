@@ -395,6 +395,12 @@ async function applyCoupon() {
 		return;
 	}
 
+	if (!props.customer) {
+		errorMessage.value = __("Please choose a customer");
+		showError(errorMessage.value);
+		return;
+	}
+
 	if (isAlreadyApplied(enteredCode)) {
 		errorMessage.value = __("This coupon is already applied");
 		showWarning(errorMessage.value);

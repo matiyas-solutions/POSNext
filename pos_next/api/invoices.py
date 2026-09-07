@@ -1974,6 +1974,105 @@ def _get_sales_invoice_permission_condition():
 
 
 @frappe.whitelist()
+@frappe.whitelist()
+def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_date=None, to_date=None, include_items=False, docstatus=None, start: int = 0) -> list:
+    """
+    Get paginated, server-side filtered list of invoices for a POS Profile.
+
+    Args:
+        pos_profile: POS Profile name
+        search: Optional search term matched against invoice name or customer_name
+        limit: Page size (default 20)
+        offset: Number of records to skip for pagination (default 0)
+        from_date: Optional start date filter (YYYY-MM-DD)
+        to_date: Optional end date filter (YYYY-MM-DD)
+        include_items: Whether to include per-invoice items (not loaded by default)
+        docstatus: Optional docstatus filter
+        start: Offset for pagination (deprecated - included for compatibility)
+
+    Returns:
+        List of invoice dicts with basic fields (no per-invoice item loading)
+    """
+    if not pos_profile:
+        frappe.throw(_("POS Profile is required"))
+
+    # Permission check
+    has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
+    if not has_access and not frappe.has_permission("Sales Invoice", "read"):
+        frappe.throw(_("You don't have access to this POS Profile"))
+
+    # Clamp page size securely: minimum 1, maximum 100
+    limit = max(1, min(cint(limit) or 20, 100))
+    offset = max(0, cint(offset) or 0)
+
+    # Build WHERE conditions and params
+    conditions = [
+        "pos_profile = %(pos_profile)s",
+        "is_pos = 1",
+    ]
+    params = {"pos_profile": pos_profile, "limit": limit, "offset": offset}
+
+    if docstatus is not None:
+        if isinstance(docstatus, (list, tuple)):
+            docstatus_list = [cint(d) for d in docstatus]
+            conditions.append(f"docstatus IN ({','.join(map(str, docstatus_list))})")
+        else:
+            conditions.append("docstatus = %(docstatus)s")
+            params["docstatus"] = cint(docstatus)
+    else:
+        conditions.append("docstatus < 2")
+
+    if search:
+        conditions.append(
+            "(name LIKE %(search)s OR customer_name LIKE %(search)s OR customer LIKE %(search)s)"
+        )
+        params["search"] = f"%{cstr(search)}%"
+
+    if from_date:
+        conditions.append("posting_date >= %(from_date)s")
+        params["from_date"] = from_date
+
+    if to_date:
+        conditions.append("posting_date <= %(to_date)s")
+        params["to_date"] = to_date
+
+    where_clause = " AND ".join(conditions)
+    params["limit"] = limit
+    params["offset"] = offset
+
+    invoices = frappe.db.sql(
+        f"""
+        SELECT
+            name,
+            customer,
+            customer_name,
+            posting_date,
+            posting_time,
+            grand_total,
+            paid_amount,
+            outstanding_amount,
+            status,
+            docstatus,
+            is_return,
+            return_against
+        FROM
+            `tabSales Invoice`
+        WHERE
+            {where_clause}
+        ORDER BY
+            posting_date DESC,
+            posting_time DESC
+        LIMIT %(limit)s
+        OFFSET %(offset)s
+    """,
+        params,
+        as_dict=True,
+    )
+
+    return invoices
+
+
+@frappe.whitelist()
 def get_invoice(invoice_name):
     """
     Get a single invoice with all details for POS.

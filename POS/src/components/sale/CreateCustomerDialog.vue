@@ -201,14 +201,8 @@
 					<Button
 						variant="solid"
 						@click="handleCreate"
-						:loading="createCustomerResource.loading || updateCustomerResource.loading || checkingPermission"
-						:disabled="
-								!customerData.customer_name ||
-								!customerData.pincode ||
-								!phoneNumber ||
-								(selectedCountryCode === '+91' && phoneNumber.length !== 10) ||
-								!hasPermission
-							"
+:loading="createCustomerResource.loading || updateCustomerResource.loading || checkingPermission"
+                        :disabled="!customerData.customer_name || !customerData.pincode || !phoneNumber || (selectedCountryCode === '+91' && phoneNumber.length !== 10) || !hasPermission"
 					>
 						{{ isEditMode ? __("Save Changes") : __("Create Customer") }}
 					</Button>
