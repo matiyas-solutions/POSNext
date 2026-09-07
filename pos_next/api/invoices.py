@@ -1785,24 +1785,19 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
-
-def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
+def get_invoices(pos_profile, limit=100):
 	"""
-	Get list of invoices for a POS Profile.
+	Get paginated, server-side filtered list of invoices for a POS Profile.
 
 	Args:
 		pos_profile: POS Profile name
 		limit: Maximum number of invoices to return (default 100)
-		start: Offset for pagination (default 0)
 
-    Returns:
-        List of invoices with details
-    """
-    if not pos_profile:
-        frappe.throw(_("POS Profile is required"))
-
-	limit = cint(limit) or 100
-	start = cint(start) or 0
+	Returns:
+		List of invoices with details
+	"""
+	if not pos_profile:
+		frappe.throw(_("POS Profile is required"))
 
 	# Check if user has access to this POS Profile
 	has_access = frappe.db.exists(
@@ -1810,11 +1805,37 @@ def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
 		{"parent": pos_profile, "user": frappe.session.user}
 	)
 
-    if not has_access and not frappe.has_permission("Sales Invoice", "read"):
-        frappe.throw(_("You don't have access to this POS Profile"))
+	if not has_access and not frappe.has_permission("Sales Invoice", "read"):
+		frappe.throw(_("You don't have access to this POS Profile"))
 
-	# Query for invoices
-	invoices = frappe.db.sql("""
+	limit = cint(limit) or 20
+	offset = cint(offset) or 0
+
+	# Build WHERE conditions and params
+	conditions = [
+		"pos_profile = %(pos_profile)s",
+		"docstatus = 1",
+		"is_pos = 1",
+	]
+	params = {"pos_profile": pos_profile, "limit": limit, "offset": offset}
+
+	if search:
+		conditions.append(
+			"(name LIKE %(search)s OR customer_name LIKE %(search)s OR customer LIKE %(search)s)"
+		)
+		params["search"] = f"%{cstr(search)}%"
+
+	if from_date:
+		conditions.append("posting_date >= %(from_date)s")
+		params["from_date"] = from_date
+
+	if to_date:
+		conditions.append("posting_date <= %(to_date)s")
+		params["to_date"] = to_date
+
+	where_clause = " AND ".join(conditions)
+
+	invoices = frappe.db.sql(f"""
 		SELECT
 			name,
 			customer,
@@ -1831,48 +1852,18 @@ def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
 		FROM
 			`tabSales Invoice`
 		WHERE
-			pos_profile = %(pos_profile)s
-			AND docstatus = 1
-			AND is_pos = 1
+			{where_clause}
 		ORDER BY
 			posting_date DESC,
 			posting_time DESC
 		LIMIT %(limit)s
-		OFFSET %(start)s
 	""", {
 		"pos_profile": pos_profile,
-		"limit": limit,
-		"start": start
+		"limit": limit
 	}, as_dict=True)
-
-	invoice_names = [invoice.name for invoice in invoices]
-	payments_by_invoice = {}
-	if invoice_names:
-		payments = frappe.db.sql("""
-			SELECT
-				parent,
-				mode_of_payment,
-				amount
-			FROM
-				`tabSales Invoice Payment`
-			WHERE
-				parent IN %(invoice_names)s
-			ORDER BY
-				parent,
-				idx
-		""", {
-			"invoice_names": tuple(invoice_names)
-		}, as_dict=True)
-
-		for payment in payments:
-			payments_by_invoice.setdefault(payment.parent, []).append({
-				"mode_of_payment": payment.mode_of_payment,
-				"amount": payment.amount,
-			})
 
 	# Load items for each invoice for filtering purposes
 	for invoice in invoices:
-		invoice.payments = payments_by_invoice.get(invoice.name, [])
 		items = frappe.db.sql("""
 			SELECT
 				item_code,
@@ -1890,7 +1881,8 @@ def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
 			"invoice_name": invoice.name
 		}, as_dict=True)
 		invoice.items = items
-    return invoices
+
+	return invoices
 
 
 # ==========================================
